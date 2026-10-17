@@ -4,6 +4,7 @@ import { partyServerPlugin } from './party-server.ts'
 
 // https://vite.dev/config/
 export default defineConfig({
+  base: './',
   plugins: [react(), partyServerPlugin()],
   server: {
     host: '0.0.0.0',
