@@ -1,19 +1,19 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { useGame } from '../context/GameContext';
 import { useAuth } from '../context/AuthContext';
-import { sound } from '../lib/audio';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Flame,
   ShieldAlert,
-  Clock,
   CheckCircle,
   XCircle,
   RotateCcw,
   Sparkles,
-  Zap,
-  Volume2,
-  VolumeX,
+  Send,
+  Mic,
+  MessageCircle,
+  HelpCircle,
+  Coffee,
 } from 'lucide-react';
 
 export const TurnCard: React.FC = () => {
@@ -24,6 +24,8 @@ export const TurnCard: React.FC = () => {
     isMyTurn,
     currentTurnMember,
     isHost,
+    lastRevealedAnswer,
+    clearLastRevealedAnswer,
     selectTurnType,
     completeTurn,
     passTurn,
@@ -34,39 +36,67 @@ export const TurnCard: React.FC = () => {
 
   const { user } = useAuth();
 
-  // Timer countdown
-  const timerMax = room?.settings?.turnTimerSeconds || 60;
-  const [timeLeft, setTimeLeft] = useState<number>(timerMax);
-
-  useEffect(() => {
-    setTimeLeft(timerMax);
-  }, [session?.currentTurnNumber, session?.turnPhase, timerMax]);
-
-  useEffect(() => {
-    if (session?.turnPhase !== 'active_challenge' || timerMax === 0) return;
-
-    const interval = setInterval(() => {
-      setTimeLeft((prev) => {
-        if (prev <= 1) {
-          clearInterval(interval);
-          return 0;
-        }
-        if (prev <= 6) {
-          sound.playTick();
-        }
-        return prev - 1;
-      });
-    }, 1000);
-
-    return () => clearInterval(interval);
-  }, [session?.turnPhase, session?.currentTurnNumber, timerMax]);
-
-  const timerPercentage = timerMax > 0 ? (timeLeft / timerMax) * 100 : 100;
+  // State for typed answers
+  const [truthAnswer, setTruthAnswer] = useState('');
+  const [dareNote, setDareNote] = useState('');
 
   if (!session) return null;
 
+  const handleTruthSubmit = () => {
+    if (!truthAnswer.trim()) return;
+    completeTurn(truthAnswer.trim());
+    setTruthAnswer('');
+  };
+
+  const handleSpokenSubmit = () => {
+    completeTurn('Answered out loud to the room 🗣️');
+    setTruthAnswer('');
+  };
+
+  const handleDareSubmit = () => {
+    completeTurn(dareNote.trim() || 'Dare challenge completed! 🔥');
+    setDareNote('');
+  };
+
   return (
-    <div className="w-full max-w-xl mx-auto px-3 py-4">
+    <div className="w-full max-w-xl mx-auto px-3 py-2">
+      {/* =========================================================================
+          TRUTH REVEALED CELEBRATORY BANNER (Shows recently answered truth to all)
+         ========================================================================= */}
+      <AnimatePresence>
+        {lastRevealedAnswer && (
+          <motion.div
+            initial={{ opacity: 0, y: -10, scale: 0.98 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: -10, scale: 0.98 }}
+            className="mb-4 p-4 rounded-2xl bg-gradient-to-r from-cyan-950/90 via-purple-950/90 to-pink-950/90 border border-cyan-400/50 shadow-2xl relative overflow-hidden"
+          >
+            <div className="flex items-center justify-between mb-1.5">
+              <span className="text-xs font-black uppercase text-cyan-300 tracking-wider flex items-center gap-1.5">
+                <Sparkles className="w-4 h-4 text-yellow-400 animate-spin-slow" />
+                <span>{lastRevealedAnswer.playerName}'s Honest Answer:</span>
+              </span>
+              <button
+                type="button"
+                onClick={clearLastRevealedAnswer}
+                className="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-white/10 text-xs"
+                title="Dismiss"
+              >
+                ✕
+              </button>
+            </div>
+            <p className="text-base sm:text-lg font-bold text-white leading-relaxed">
+              "{lastRevealedAnswer.answerText}"
+            </p>
+            {lastRevealedAnswer.questionText && (
+              <p className="text-[11px] text-purple-300/80 mt-1.5 truncate">
+                Prompt: "{lastRevealedAnswer.questionText}"
+              </p>
+            )}
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       <AnimatePresence mode="wait">
         {/* =========================================================================
             STATE 1: CHOOSING TRUTH OR DARE
@@ -81,19 +111,20 @@ export const TurnCard: React.FC = () => {
           >
             {isMyTurn ? (
               <div className="w-full">
-                <div className="mb-4">
+                <div className="mb-3">
                   <span className="inline-block bg-pink-500/20 text-pink-300 border border-pink-500/30 px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider animate-pulse">
                     🔥 It's Your Turn, {user?.username}!
                   </span>
                   <h2 className="text-2xl sm:text-3xl font-black text-white mt-2">
                     Make Your Choice
                   </h2>
-                  <p className="text-sm text-slate-300 mt-1">
-                    Will you reveal a secret or conquer a challenge?
+                  <p className="text-xs sm:text-sm text-slate-300 mt-1 flex items-center justify-center gap-1">
+                    <Coffee className="w-3.5 h-3.5 text-cyan-300" />
+                    <span>No timer • Take your time to think and choose!</span>
                   </p>
                 </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-6">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-4">
                   {/* TRUTH CARD BUTTON */}
                   <motion.button
                     whileHover={{ scale: 1.04, y: -4 }}
@@ -115,7 +146,7 @@ export const TurnCard: React.FC = () => {
                         Answer 100% Honestly
                       </p>
                       <p className="text-xs text-slate-400 mt-1">
-                        Crushes, funny secrets, embarrassing stories & deep talks.
+                        Type your honest answer so everyone can read it!
                       </p>
                     </div>
                     <div className="w-full py-2 bg-cyan-500 text-slate-950 font-bold text-center rounded-xl text-sm group-hover:bg-cyan-400 transition-colors shadow">
@@ -144,7 +175,7 @@ export const TurnCard: React.FC = () => {
                         Take The Challenge
                       </p>
                       <p className="text-xs text-slate-400 mt-1">
-                        Funny actions, impressions, dances, camera tricks & songs!
+                        Fun actions, camera tricks, impressions & challenges.
                       </p>
                     </div>
                     <div className="w-full py-2 bg-pink-500 text-white font-bold text-center rounded-xl text-sm group-hover:bg-pink-400 transition-colors shadow">
@@ -185,7 +216,7 @@ export const TurnCard: React.FC = () => {
             animate={{ rotateY: 0, opacity: 1 }}
             exit={{ rotateY: -90, opacity: 0 }}
             transition={{ duration: 0.45, ease: 'easeOut' }}
-            className={`relative p-6 sm:p-8 rounded-3xl shadow-2xl border-2 flex flex-col justify-between min-h-[360px] ${
+            className={`relative p-5 sm:p-7 rounded-3xl shadow-2xl border-2 flex flex-col justify-between min-h-[360px] ${
               currentQuestion.type === 'truth'
                 ? 'bg-gradient-to-b from-[#0c2444]/95 via-[#0e1b38]/95 to-[#071329]/95 border-cyan-500/50 shadow-cyan-500/20'
                 : 'bg-gradient-to-b from-[#380e28]/95 via-[#290d21]/95 to-[#1e0716]/95 border-pink-500/50 shadow-pink-500/20'
@@ -193,7 +224,7 @@ export const TurnCard: React.FC = () => {
           >
             {/* Header badges */}
             <div>
-              <div className="flex items-center justify-between gap-2 mb-4">
+              <div className="flex items-center justify-between gap-2 mb-3">
                 <div className="flex items-center gap-2">
                   <span
                     className={`px-3 py-1 rounded-full text-xs font-black uppercase tracking-wider ${
@@ -209,106 +240,182 @@ export const TurnCard: React.FC = () => {
                   </span>
                 </div>
 
-                {/* Difficulty Tag */}
-                <span
-                  className={`text-xs px-2.5 py-0.5 rounded-full font-bold uppercase tracking-wider ${
-                    currentQuestion.difficulty === 'spicy'
-                      ? 'bg-red-500/20 text-red-300 border border-red-500/40'
-                      : currentQuestion.difficulty === 'medium'
-                      ? 'bg-yellow-500/20 text-yellow-300 border border-yellow-500/40'
-                      : 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
-                  }`}
-                >
-                  {currentQuestion.difficulty === 'spicy' ? '🔥 Spicy' : currentQuestion.difficulty}
-                </span>
+                {/* Difficulty & No-Timer Badge */}
+                <div className="flex items-center gap-1.5">
+                  <span className="text-[11px] bg-white/10 text-slate-300 px-2 py-0.5 rounded-full font-medium">
+                    💭 No rush
+                  </span>
+                  <span
+                    className={`text-xs px-2.5 py-0.5 rounded-full font-bold uppercase tracking-wider ${
+                      currentQuestion.difficulty === 'spicy'
+                        ? 'bg-red-500/20 text-red-300 border border-red-500/40'
+                        : currentQuestion.difficulty === 'medium'
+                        ? 'bg-yellow-500/20 text-yellow-300 border border-yellow-500/40'
+                        : 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
+                    }`}
+                  >
+                    {currentQuestion.difficulty === 'spicy' ? '🔥 Spicy' : currentQuestion.difficulty}
+                  </span>
+                </div>
               </div>
 
               {/* Player Turn Indicator */}
-              <div className="text-xs font-medium text-purple-300/90 mb-3 flex items-center gap-1.5">
+              <div className="text-xs font-medium text-purple-300/90 mb-2 flex items-center gap-1.5">
                 <span>Player:</span>
-                <span className="font-bold text-white">{currentTurnMember?.username}</span>
+                <span className="font-bold text-white text-sm">{currentTurnMember?.username}</span>
                 {isMyTurn && (
-                  <span className="text-[10px] bg-pink-500 text-white px-1.5 py-0.2 rounded font-bold">
-                    YOU
+                  <span className="text-[10px] bg-pink-500 text-white px-1.5 py-0.5 rounded font-bold uppercase">
+                    Your Turn
                   </span>
                 )}
               </div>
 
               {/* The Question Text */}
-              <h2 className="text-xl sm:text-2xl font-bold text-white leading-relaxed mt-4 drop-shadow">
+              <h2 className="text-xl sm:text-2xl font-bold text-white leading-relaxed mt-2 drop-shadow">
                 "{currentQuestion.text}"
               </h2>
             </div>
 
-            {/* Timer countdown bar */}
-            {timerMax > 0 && (
-              <div className="my-5">
-                <div className="flex items-center justify-between text-xs text-slate-300 mb-1.5 font-mono">
-                  <span className="flex items-center gap-1">
-                    <Clock className="w-3.5 h-3.5 text-pink-400" /> Time Remaining
-                  </span>
-                  <span className={timeLeft <= 10 ? 'text-red-400 font-bold animate-pulse' : ''}>
-                    {timeLeft}s
-                  </span>
-                </div>
-                <div className="w-full h-2 bg-black/40 rounded-full overflow-hidden border border-white/10">
-                  <motion.div
-                    className={`h-full rounded-full transition-all duration-300 ${
-                      timeLeft <= 10
-                        ? 'bg-red-500'
-                        : currentQuestion.type === 'truth'
-                        ? 'bg-cyan-400'
-                        : 'bg-pink-500'
-                    }`}
-                    style={{ width: `${timerPercentage}%` }}
-                  />
-                </div>
+            {/* =====================================================================
+                TRUTH QUESTION ANSWERING SECTION
+               ===================================================================== */}
+            {currentQuestion.type === 'truth' && (
+              <div className="mt-4 pt-3 border-t border-white/10">
+                {isMyTurn ? (
+                  <div className="space-y-3">
+                    <label className="block text-xs font-bold text-cyan-300 uppercase tracking-wider flex items-center gap-1.5">
+                      <MessageCircle className="w-4 h-4 text-cyan-400" />
+                      <span>Write Your Honest Answer:</span>
+                    </label>
+
+                    <textarea
+                      value={truthAnswer}
+                      onChange={(e) => setTruthAnswer(e.target.value)}
+                      placeholder="Type your honest answer here... Take all the time you need to think! 💭"
+                      rows={3}
+                      className="w-full bg-slate-950/80 border border-cyan-500/40 rounded-2xl p-3.5 text-sm text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-cyan-400 focus:border-cyan-400 shadow-inner"
+                    />
+
+                    <div className="flex flex-col sm:flex-row gap-2.5">
+                      <button
+                        type="button"
+                        disabled={!truthAnswer.trim()}
+                        onClick={handleTruthSubmit}
+                        className="flex-1 py-3 px-4 rounded-2xl bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 disabled:opacity-40 disabled:cursor-not-allowed text-slate-950 font-black text-sm shadow-lg shadow-cyan-500/25 flex items-center justify-center gap-2 transition-all active:scale-98"
+                      >
+                        <Send className="w-4 h-4" />
+                        <span>Submit Honest Answer</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={handleSpokenSubmit}
+                        className="py-3 px-4 rounded-2xl bg-slate-800/90 hover:bg-slate-700/90 text-slate-200 text-xs sm:text-sm font-semibold border border-white/10 flex items-center justify-center gap-1.5 transition-colors"
+                        title="If you answered verbally in person or voice/video call"
+                      >
+                        <Mic className="w-4 h-4 text-cyan-400" />
+                        <span>Answered Out Loud</span>
+                      </button>
+
+                      {room?.settings.allowPass && (
+                        <button
+                          type="button"
+                          onClick={passTurn}
+                          className="py-3 px-4 rounded-2xl bg-slate-900/80 hover:bg-slate-800/80 text-slate-400 hover:text-white text-xs font-semibold border border-white/5 flex items-center justify-center gap-1.5 transition-colors"
+                        >
+                          <ShieldAlert className="w-4 h-4 text-slate-400" />
+                          <span>Pass (Safe)</span>
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                ) : (
+                  /* Other players waiting */
+                  <div className="p-4 rounded-2xl bg-slate-900/60 border border-white/10 text-center space-y-1">
+                    <div className="inline-flex items-center gap-2 text-cyan-300 font-bold text-sm">
+                      <span className="w-2.5 h-2.5 rounded-full bg-cyan-400 animate-ping" />
+                      <span>Waiting for {currentTurnMember?.username} to write their answer...</span>
+                    </div>
+                    <p className="text-xs text-slate-400">
+                      No timer is running — they have all the time they need to think! 💭
+                    </p>
+                    {isHost && (
+                      <div className="pt-2">
+                        <button
+                          type="button"
+                          onClick={skipTurn}
+                          className="text-xs text-slate-400 hover:text-red-400 inline-flex items-center gap-1 bg-white/5 hover:bg-white/10 px-3 py-1 rounded-xl transition-colors"
+                        >
+                          <XCircle className="w-3.5 h-3.5" /> Skip Player
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
             )}
 
-            {/* Action Buttons */}
-            <div className="pt-2">
-              {isMyTurn ? (
-                <div className="flex flex-col sm:flex-row gap-3">
-                  <button
-                    type="button"
-                    onClick={() => completeTurn()}
-                    className="flex-1 py-3 px-4 rounded-2xl bg-gradient-to-r from-emerald-500 to-teal-500 text-white font-bold text-sm sm:text-base hover:from-emerald-400 hover:to-teal-400 active:scale-98 transition-all shadow-lg shadow-emerald-500/25 flex items-center justify-center gap-2"
-                  >
-                    <CheckCircle className="w-5 h-5" />
-                    <span>Done & Completed!</span>
-                  </button>
+            {/* =====================================================================
+                DARE CHALLENGE SECTION
+               ===================================================================== */}
+            {currentQuestion.type === 'dare' && (
+              <div className="mt-4 pt-3 border-t border-white/10">
+                {isMyTurn ? (
+                  <div className="space-y-3">
+                    <input
+                      type="text"
+                      value={dareNote}
+                      onChange={(e) => setDareNote(e.target.value)}
+                      placeholder="Optional: Leave a comment or note about how the dare went..."
+                      className="w-full bg-slate-950/80 border border-pink-500/40 rounded-2xl px-4 py-2.5 text-sm text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-pink-500"
+                    />
 
-                  {room?.settings.allowPass && (
-                    <button
-                      type="button"
-                      onClick={passTurn}
-                      className="py-3 px-4 rounded-2xl bg-slate-800/80 hover:bg-slate-700/80 text-slate-300 hover:text-white font-medium text-sm transition-all border border-white/10 flex items-center justify-center gap-1.5"
-                      title="Pass without pressure"
-                    >
-                      <ShieldAlert className="w-4 h-4 text-slate-400" />
-                      <span>Pass (Safe)</span>
-                    </button>
-                  )}
-                </div>
-              ) : (
-                <div className="flex items-center justify-between">
-                  <div className="text-xs text-slate-400 italic">
-                    Watching {currentTurnMember?.username} complete the prompt...
+                    <div className="flex flex-col sm:flex-row gap-2.5">
+                      <button
+                        type="button"
+                        onClick={handleDareSubmit}
+                        className="flex-1 py-3 px-4 rounded-2xl bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 text-white font-black text-sm shadow-lg shadow-emerald-500/25 flex items-center justify-center gap-2 transition-all active:scale-98"
+                      >
+                        <CheckCircle className="w-5 h-5" />
+                        <span>I Did It! Done & Completed!</span>
+                      </button>
+
+                      {room?.settings.allowPass && (
+                        <button
+                          type="button"
+                          onClick={passTurn}
+                          className="py-3 px-4 rounded-2xl bg-slate-800/80 hover:bg-slate-700/80 text-slate-300 hover:text-white text-xs font-semibold border border-white/10 flex items-center justify-center gap-1.5"
+                        >
+                          <ShieldAlert className="w-4 h-4 text-slate-400" />
+                          <span>Pass (Safe)</span>
+                        </button>
+                      )}
+                    </div>
                   </div>
-
-                  {isHost && (
-                    <button
-                      type="button"
-                      onClick={skipTurn}
-                      className="text-xs text-slate-400 hover:text-red-400 flex items-center gap-1 bg-white/5 hover:bg-white/10 px-3 py-1.5 rounded-xl border border-white/5 transition-colors"
-                    >
-                      <XCircle className="w-3.5 h-3.5" /> Skip Player
-                    </button>
-                  )}
-                </div>
-              )}
-            </div>
+                ) : (
+                  <div className="p-4 rounded-2xl bg-slate-900/60 border border-white/10 text-center space-y-1">
+                    <div className="inline-flex items-center gap-2 text-pink-300 font-bold text-sm">
+                      <span className="w-2.5 h-2.5 rounded-full bg-pink-500 animate-ping" />
+                      <span>Watching {currentTurnMember?.username} complete the dare!</span>
+                    </div>
+                    <p className="text-xs text-slate-400">
+                      Cheer them on using the reaction buttons below! 🔥
+                    </p>
+                    {isHost && (
+                      <div className="pt-2">
+                        <button
+                          type="button"
+                          onClick={skipTurn}
+                          className="text-xs text-slate-400 hover:text-red-400 inline-flex items-center gap-1 bg-white/5 hover:bg-white/10 px-3 py-1 rounded-xl transition-colors"
+                        >
+                          <XCircle className="w-3.5 h-3.5" /> Skip Player
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
           </motion.div>
         )}
 
@@ -362,7 +469,7 @@ export const TurnCard: React.FC = () => {
         <span className="text-xs font-semibold text-purple-300 hidden sm:inline mr-1">
           Cheer & React:
         </span>
-        {['😂', '🔥', '😱', '👏', '💀', '🍿'].map((emoji) => (
+        {['😂', '🔥', '😱', '👏', '💀', '🍿', '💖', '🤐'].map((emoji) => (
           <button
             key={emoji}
             type="button"

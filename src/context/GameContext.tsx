@@ -35,6 +35,8 @@ interface GameContextType {
   currentTurnMember: RoomMember | null;
   allQuestions: Question[];
   playerQuestionHistory: Record<string, string[]>; // playerId -> questionIds asked this session
+  lastRevealedAnswer: { playerName: string; questionText: string; answerText: string; type: string } | null;
+  clearLastRevealedAnswer: () => void;
 
   // Room actions
   createRoom: (customSettings?: Partial<RoomSettings>) => Promise<string>;
@@ -72,7 +74,7 @@ const GameContext = createContext<GameContextType | undefined>(undefined);
 const DEFAULT_SETTINGS: RoomSettings = {
   maxPlayers: 12,
   turnOrder: 'random',
-  turnTimerSeconds: 60,
+  turnTimerSeconds: 0, // 0 for unlimited / no timer so players can think peacefully!
   categories: [
     'funny',
     'friendship',
@@ -103,6 +105,7 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [reactions, setReactions] = useState<EmojiReaction[]>([]);
   const [customQuestions, setCustomQuestions] = useState<Question[]>([]);
   const [questionHistory, setQuestionHistory] = useState<QuestionHistoryItem[]>([]);
+  const [lastRevealedAnswer, setLastRevealedAnswer] = useState<{ playerName: string; questionText: string; answerText: string; type: string } | null>(null);
 
   // Local BroadcastChannel and WebSocket for instant multi-device sync
   const broadcastChannelRef = useRef<BroadcastChannel | null>(null);
@@ -237,7 +240,18 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
         case 'TURN_COMPLETED':
           setSession(payload.session);
           setCurrentQuestion(null);
-          addActivity('turn_completed', `${payload.playerName} completed their challenge! 🔥`, payload.playerName);
+          if (payload.answerText) {
+            setLastRevealedAnswer({
+              playerName: payload.playerName,
+              questionText: payload.questionText || '',
+              answerText: payload.answerText,
+              type: payload.type || 'truth',
+            });
+          }
+          const completedMsg = payload.answerText
+            ? `${payload.playerName} answered: "${payload.answerText}" 🔥`
+            : `${payload.playerName} completed their challenge! 🔥`;
+          addActivity('turn_completed', completedMsg, payload.playerName);
           sound.playCelebration();
           confetti({
             particleCount: 80,
@@ -816,7 +830,7 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   // Helper to advance to next turn
   const advanceTurn = useCallback(
-    (reason: 'completed' | 'passed' | 'skipped') => {
+    (reason: 'completed' | 'passed' | 'skipped', answerNotes?: string) => {
       if (!session || !room) return;
 
       const nextMember = selectNextPlayer(
@@ -844,19 +858,32 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
           ? 'TURN_PASSED'
           : 'TURN_SKIPPED';
 
+      // If completing with an answer, update local reveal state as well
+      if (reason === 'completed' && answerNotes && currentPlayer) {
+        setLastRevealedAnswer({
+          playerName: currentPlayer.username,
+          questionText: currentQuestion?.text || '',
+          answerText: answerNotes,
+          type: session.selectedType || 'truth',
+        });
+      }
+
       setSession(updatedSession);
       setCurrentQuestion(null);
 
       broadcastSync(actionName, {
         session: updatedSession,
         playerName: currentPlayer?.username || 'Player',
+        answerText: answerNotes || null,
+        questionText: currentQuestion?.text || null,
+        type: session.selectedType,
       });
     },
-    [session, room, members, selectNextPlayer, broadcastSync]
+    [session, room, members, selectNextPlayer, broadcastSync, currentQuestion]
   );
 
   // 13. COMPLETE TURN
-  const completeTurn = () => {
+  const completeTurn = (answerNotes?: string) => {
     if (!isMyTurn || !session || !user) return;
 
     // Update user stats
@@ -864,6 +891,12 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
       updateProfile({ truthsCount: (user.truthsCount || 0) + 1 });
     } else if (session.selectedType === 'dare') {
       updateProfile({ daresCount: (user.daresCount || 0) + 1 });
+    }
+
+    // If an answer was written, also post to chat so everyone can read and react
+    if (answerNotes && answerNotes.trim()) {
+      const typeLabel = session.selectedType === 'truth' ? 'Truth Answer' : 'Dare Note';
+      sendMessage(`💬 [${typeLabel}]: "${answerNotes.trim()}"`);
     }
 
     sound.playCelebration();
@@ -874,7 +907,7 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
       colors: ['#ff2a85', '#00f0ff', '#8b5cf6', '#facc15'],
     });
 
-    advanceTurn('completed');
+    advanceTurn('completed', answerNotes);
   };
 
   // 14. PASS TURN (Without pressure)
@@ -975,6 +1008,8 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
         currentTurnMember,
         allQuestions,
         playerQuestionHistory,
+        lastRevealedAnswer,
+        clearLastRevealedAnswer: () => setLastRevealedAnswer(null),
 
         createRoom,
         joinRoom,
