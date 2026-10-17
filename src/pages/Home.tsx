@@ -40,12 +40,16 @@ export const Home: React.FC = () => {
     const params = new URLSearchParams(window.location.search);
     const joinCode = params.get('join');
     if (joinCode) {
-      setJoinCodeInput(joinCode.toUpperCase());
+      const code = joinCode.toUpperCase();
+      setJoinCodeInput(code);
+      if (user) {
+        joinRoom(code);
+      }
     }
-  }, []);
+  }, [user, joinRoom]);
 
   // Handle Guest Login
-  const handleGuestSubmit = (e: React.FormEvent) => {
+  const handleGuestSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!username.trim()) {
       setAuthError('Please choose a party nickname!');
@@ -53,6 +57,14 @@ export const Home: React.FC = () => {
     }
     setAuthError(null);
     signInAsGuest(username, selectedAvatar);
+    if (joinCodeInput.trim()) {
+      setActionLoading(true);
+      const res = await joinRoom(joinCodeInput.trim());
+      setActionLoading(false);
+      if (!res.success && res.error) {
+        setJoinError(res.error);
+      }
+    }
   };
 
   // Handle Login
@@ -198,6 +210,16 @@ export const Home: React.FC = () => {
             {/* TAB 1: QUICK PLAY GUEST */}
             {authTab === 'guest' && (
               <form onSubmit={handleGuestSubmit} className="space-y-4">
+                {joinCodeInput && (
+                  <div className="p-3 bg-pink-500/20 border border-pink-500/40 rounded-2xl mb-2 text-center animate-pulse">
+                    <span className="text-xs text-pink-300 font-bold">
+                      🎉 You are joining Room <span className="font-mono text-white text-sm">{joinCodeInput}</span>!
+                    </span>
+                    <p className="text-[11px] text-slate-300 mt-0.5">
+                      Pick your avatar & nickname below to enter the squad!
+                    </p>
+                  </div>
+                )}
                 <div>
                   <label className="block text-xs font-semibold text-purple-200 mb-1.5">
                     Choose Your Avatar:

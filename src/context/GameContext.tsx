@@ -18,6 +18,7 @@ import { useAuth } from './AuthContext';
 import { INITIAL_QUESTIONS } from '../lib/questions-data';
 import { sound } from '../lib/audio';
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
+import { apiCreateRoom, apiGetRoom, apiJoinRoom, apiUpdateRoom } from '../lib/server-api';
 import confetti from 'canvas-confetti';
 
 interface GameContextType {
@@ -103,8 +104,9 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [customQuestions, setCustomQuestions] = useState<Question[]>([]);
   const [questionHistory, setQuestionHistory] = useState<QuestionHistoryItem[]>([]);
 
-  // Local BroadcastChannel for instant multi-tab sync when running locally/offline
+  // Local BroadcastChannel and WebSocket for instant multi-device sync
   const broadcastChannelRef = useRef<BroadcastChannel | null>(null);
+  const webSocketRef = useRef<WebSocket | null>(null);
   const supabaseChannelRef = useRef<any>(null);
 
   // Load custom questions from localStorage
@@ -135,10 +137,22 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
   );
   const currentTurnMember = members.find((m) => m.userId === session?.currentTurnPlayerId) || null;
 
-  // Broadcast a game state payload to all peers (via Supabase Realtime OR BroadcastChannel)
+  // Broadcast a game state payload to all peers (via WebSocket, Supabase Realtime, or BroadcastChannel)
   const broadcastSync = useCallback(
     (actionType: string, payload: any) => {
-      // 1. Supabase Broadcast
+      // 1. Server WebSocket (cross-device across the internet)
+      if (webSocketRef.current && webSocketRef.current.readyState === WebSocket.OPEN && room) {
+        webSocketRef.current.send(
+          JSON.stringify({
+            type: 'BROADCAST',
+            roomCode: room.roomCode,
+            event: actionType,
+            payload,
+          })
+        );
+      }
+
+      // 2. Supabase Broadcast
       if (supabaseChannelRef.current) {
         supabaseChannelRef.current.send({
           type: 'broadcast',
@@ -146,7 +160,8 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
           payload,
         });
       }
-      // 2. Local BroadcastChannel
+
+      // 3. Local BroadcastChannel
       if (broadcastChannelRef.current) {
         broadcastChannelRef.current.postMessage({
           type: actionType,
@@ -155,7 +170,7 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
         });
       }
     },
-    []
+    [room]
   );
 
   // Add event to live activity feed
@@ -292,7 +307,33 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
       console.warn('BroadcastChannel not supported in this environment');
     }
 
-    // 2. Setup Supabase Realtime channel if available
+    // 2. Setup Server WebSocket for cross-device real-time sync
+    try {
+      const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+      const wsUrl = `${proto}//${window.location.host}/ws`;
+      const ws = new WebSocket(wsUrl);
+
+      ws.onopen = () => {
+        ws.send(JSON.stringify({ type: 'SUBSCRIBE', roomCode: room.roomCode }));
+      };
+
+      ws.onmessage = (event) => {
+        try {
+          const msg = JSON.parse(event.data);
+          if (msg.type && msg.payload) {
+            handleIncomingMessage(msg.type, msg.payload);
+          }
+        } catch (err) {
+          console.error('Error handling WebSocket message:', err);
+        }
+      };
+
+      webSocketRef.current = ws;
+    } catch (err) {
+      console.warn('WebSocket setup warning:', err);
+    }
+
+    // 3. Setup Supabase Realtime channel if available
     if (isSupabaseConfigured() && supabase) {
       const channel = supabase.channel(channelName);
 
@@ -309,12 +350,23 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
       supabaseChannelRef.current = channel;
 
       return () => {
+        if (webSocketRef.current) {
+          webSocketRef.current.close();
+          webSocketRef.current = null;
+        }
         if (supabaseChannelRef.current && supabase) {
           supabase.removeChannel(supabaseChannelRef.current);
           supabaseChannelRef.current = null;
         }
       };
     }
+
+    return () => {
+      if (webSocketRef.current) {
+        webSocketRef.current.close();
+        webSocketRef.current = null;
+      }
+    };
   }, [room?.roomCode, handleIncomingMessage]);
 
   // SMART RANDOM QUESTION PICKER (Strict No-Repeat Implementation)
@@ -433,7 +485,10 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setChatMessages([]);
     addActivity('player_joined', `${user.username} created room ${code}!`, user.username);
 
-    // Save to localStorage room registry so other tabs can discover it
+    // Save room to Server (enables cross-device multiplayer!)
+    await apiCreateRoom(newRoom);
+
+    // Save to localStorage room registry as fallback
     try {
       const roomsRegistry = JSON.parse(localStorage.getItem('tod_public_rooms') || '{}');
       roomsRegistry[code] = newRoom;
@@ -470,10 +525,15 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     const formattedCode = code.trim().toUpperCase();
 
-    // Check localStorage registry or Supabase
+    // Check Server API first (cross-device support!)
     let targetRoom: Room | null = null;
+    const serverRoom = await apiGetRoom(formattedCode);
+    if (serverRoom) {
+      targetRoom = serverRoom;
+    }
 
-    if (isSupabaseConfigured() && supabase) {
+    // Check Supabase if configured
+    if (!targetRoom && isSupabaseConfigured() && supabase) {
       const { data, error } = await supabase
         .from('rooms')
         .select('*, room_members(*, profiles(*))')
@@ -557,6 +617,9 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     setRoom(updatedRoom);
     setMembers(updatedMembers);
+
+    // Save to Server
+    await apiJoinRoom(formattedCode, currentMemberData);
 
     // Save update in registry
     try {
